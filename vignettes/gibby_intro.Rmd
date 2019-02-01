@@ -1,0 +1,15 @@
+---
+title: "How to Use the gibby Package"
+author: "MAJ"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{gibbyIntro}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+
+
+This is a test.
+

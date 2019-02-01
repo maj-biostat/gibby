@@ -1,0 +1,20 @@
+Package: gibby
+Type: Package
+Title: Experimental Gibbs samplers and things.
+Version: 1.0
+Date: 2019-02-01
+Author: Mark Jones
+Maintainer: Your Name <mark@tki.org>
+Description: Experimental gibbs samplers.
+License: GPL (>= 2)
+Depends:
+    R (>= 3.5.0),
+    Rcpp,
+    RcppDist,
+    RcppArmadillo
+Imports: Rcpp (>= 1.0.0)
+Suggests:
+    knitr,
+    rmarkdown
+LinkingTo: Rcpp, RcppArmadillo, RcppDist
+VignetteBuilder: knitr
