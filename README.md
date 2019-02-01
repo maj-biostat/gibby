@@ -1,2 +1,2 @@
 # gibby
-Gibbs samplers
+Gibbs sampler experiments
