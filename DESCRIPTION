@@ -16,6 +16,8 @@ Imports: Rcpp (>= 1.0.0)
 Suggests:
     knitr,
     rmarkdown,
-    brms
+    brms,
+    boot,
+    dplyr
 LinkingTo: Rcpp, RcppArmadillo, RcppDist
 VignetteBuilder: knitr
