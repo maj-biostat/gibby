@@ -2,14 +2,227 @@
 title: "How to Use the gibby Package"
 author: "MAJ"
 date: "`r Sys.Date()`"
-output: rmarkdown::html_vignette
+output: 
+  html_vignette:
+    toc: yes
 vignette: >
-  %\VignetteIndexEntry{gibbyIntro}
   %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteIndexEntry{How to use the gibby package}
   \usepackage[utf8]{inputenc}
 ---
 
 
 
-This is a test.
+# Logistic regression
+
+Gibbs sampling is not easy for logistic because you cannot get to the conditional posteriors in closed form to sample from.
+
+Assume we observe $(x_i, y_i)$ with $i = 1, \dots, n$ according to:
+
+$$
+  y_i \sim Bernoulli(p_i)
+$$
+
+and adopt
+
+$$
+  logit(p_i) = \beta_0 + \beta_1 x
+$$
+
+For a binomial we have:
+
+$$
+Pr(y = k) = {n \choose k} p^k (1-p)^{n-k}
+$$
+
+and here $n = 1$ for each unit so the probability of an event is:
+
+$$
+Pr(y_i = 1) = p^{y_i} (1-p)^{1 - y_i}
+$$
+
+Expanding $p$ the likelihood (denoted with $L$) that is obtained from n observations is.
+
+$$
+L(\beta | y_i) \propto \prod_{i=1}^n \left( \frac{exp(x_i\beta)}{1+exp(x_i\beta)} \right)^{y_i} \left( \frac{1}{1+exp(x_i\beta)} \right)^{1-y_i}
+$$
+
+Or if we leave p as was (rather than introducing the linear predictor), we have:
+
+$$
+L(\beta | y_i) \propto \prod_{i=1}^n (p_i)^{y_i} (1-p_i)^{1-y_i}
+$$
+
+The log-likelihood (denoted by $l$) is:
+
+$$
+l(\beta | y_i) \propto \sum_{i=1}^n \left( y_i log(p_i) + (1-y_i)log(1-p_i) \right)
+$$
+
+But, just for reference, if you do various substitution and manipulations you end up with this.
+
+$$
+l(\beta | y_i) \propto \sum_{i=1}^n \left( y_i x_i\beta -log(1 + exp(x_i \beta)) \right)
+$$
+
+## Priors
+
+I am going to use normal priors on the betas with mean zero and arbitrary sigma but also note Example 7.11 in monte carlo statistical methods (https://www.springer.com/gp/book/9780387212395) has quite a different approach. The beta-binomial conjugate approach often uses a uniform prior.
+
+Anyway, a normal prior, gives you a posterior as follows (k is number of variates). Note that the $x_i \beta$ terms represent the product of the $i^{th}$ row in the design matrix with a vector of $\beta$ parameter estimates i.e. it is a vector multiplication. 
+
+$$
+\text{unnormalised post} \propto \left[\prod_{i=1}^n \left( \frac{exp(x_i\beta)}{1+exp(x_i\beta)} \right)^{y_i} \left( \frac{1}{1+exp(x_i\beta)} \right)^{1-y_i}\right] \times \left[ \prod_{j=1}^k \frac{1}{\sigma_j\sqrt{2\pi}} exp(\frac{-(\beta_j-\mu_j)^2}{2\sigma^2}) \right] 
+$$
+
+Simplifying and taking logs we can see that (remember $p_i = \text{inv_logit}(X_i\beta)$):
+
+$$
+log f(\beta|\phi, X, y) \propto \sum_{i=1}^n \left[ y_i log(p_i) + (1-y_i)log(1-p_i) \right] - \frac{1}{2\phi}(\beta - \mu)'(\beta-\mu)
+$$
+
+For this posterior we cannot split it up into the component conditional distributions, but we can get to the conditional by adding a secondary loop within the original ``Gibbs'' loop, which uses a MH sampler. However, the conditional posterior for $\phi$ is conjugate so we can draw from the inverse gamma again but the approach is slow. An alternatvie was presented in 2013 by Polson - Bayesian Inference for Logistic Models Using Pólya–Gamma Latent Variables (https://www.tandfonline.com/doi/abs/10.1080/01621459.2013.829001). The `gibby` package contains a basic implementation - it should be considered experimental rather industrial for application in production code.
+
+# Example
+
+Consider a dichotomous endpoint with two groups  (placebo versus treatment). We assume that events occur in the placebo and treatment arms with occur with probability of 0.4 and 0.6 respectively. We can generate data under this model as follows.
+
+```{r}
+set.seed(7)
+logit<-function(x){log(x/(1-x))}
+inv_logit<-function(x){exp(x)/(1+exp(x))}
+
+suppressPackageStartupMessages(library(gibby))
+
+p <- c(0.4, 0.6)
+N <- 100
+d <- data.frame(trt = rep(0:1, each = N/2))
+d$y <- c(rbinom(n = N/2, size = 1, prob = p[1]), 
+         rbinom(n = N/2, size = 1, prob = p[2]))
+
+# with p = 0.4 and 0.6 and N = 1000 we should see about 20 events 
+# in the ctl arm and 30 events in the treatment arm.
+descr::CrossTable(d$trt, d$y, 
+                  prop.r = T,
+                  prop.c = F,
+                  prop.t = F,
+                  expected = F,
+                  prop.chisq = F)
+```
+
+## Using a GLM
+
+Use the R `glm` function to estiamte the parameters and compute the predicted values.
+
+```{r}
+summary(lm1 <- glm(y ~ trt, family = binomial, data = d))
+
+# Differences
+inv_logit(coef(lm1)[1])
+inv_logit(sum(coef(lm1)))
+# Check
+predict(lm1, newdata = data.frame(trt = 0:1), type = "response")
+diff(predict(lm1, newdata = data.frame(trt = 0:1), type = "response"))
+```
+
+Bootstrap the difference between the two proportions.
+
+```{r}
+suppressPackageStartupMessages(library(boot))
+diff_trt <- function(d, indices){
+  fit <- glm(formula = y ~ trt, family = binomial, data = d[indices, ])
+  diff(predict(fit, newdata = data.frame(trt = 0:1), type = "response"))
+}
+b <- boot(data = d, statistic = diff_trt, R = 3000)
+```
+
+
+## Beta binomial conjugate prior
+
+Assumes a uniform prior.
+
+```{r}
+suppressPackageStartupMessages(library(dplyr))
+d2 <- d %>%
+  dplyr::filter(y == 1) %>%
+  dplyr::group_by(trt) %>%
+  dplyr::summarise(n = n())
+
+theta1 <- rbeta(3000, shape1 = 1 + sum(d2$n[d2$trt == 0]), shape2 = 1 + N/2 - sum(d2$n[d2$trt == 0]))
+theta2 <- rbeta(3000, shape1 = 1 + sum(d2$n[d2$trt == 1]), shape2 = 1 + N/2 - sum(d2$n[d2$trt == 1]))
+
+delta_a <- theta2 - theta1
+```
+
+
+## Brms logistic regression
+
+Use a normal prior.
+
+```{r}
+suppressPackageStartupMessages(library(brms))
+
+d2 <- d %>%
+  dplyr::filter(y == 1) %>%
+  dplyr::group_by(trt) %>%
+  dplyr::summarise(events = n(), 
+                   n = N/2)
+b1 <- 
+  brm(data = d2, family = binomial,
+      events | trials(n) ~ trt,
+      prior(normal(0, 5), class = b),
+      control=list(stepsize=0.01, adapt_delta=0.99),
+      iter = 4000, warmup = 1000, thin =2, chains = 1, cores = 8,
+      save_all_pars = T)
+
+summary(b1)
+
+m1 <- posterior_samples(b1)
+delta_b <- inv_logit(m1[,2] + m1[, 1]) - inv_logit(m1[, 1])
+```
+
+## Polya sampler logistic regression
+
+Use same number of samples, burnin etc that use in `brm`.
+
+```{r}
+niter <- 4000
+nburn <- 1000
+thin <- 2
+idx <- seq(from = nburn + 1, to = niter, by = thin)
+length(idx)
+# standard dev for the normal priors for betas.
+sigma <- c(5, 2.5)
+
+X <- model.matrix(~ trt  , data = d)
+samps <- rcpp_gibbs_logistic(d$y, X, sigma, niter)
+# Get rid of the burnin
+samps <- samps[idx,]
+
+delta_c <- inv_logit(samps[,2] + samps[, 1]) - inv_logit(samps[, 1])
+```
+
+## Results
+
+On the left, histogram of bootstrapped difference between probabilities of events in the control and treatment arm from GLM fitted with `glm`. Overlay the posterior resulting from two independent beta-binomial conjugate analyses. On the right, posterior obtained from `brm` fit. Overlayed is the posterior from the Polya-gamma approach.
+
+```{r, fig.height = 6, fig.width = 8}
+par(mfrow = c(1, 2))
+hist(b$t, freq = F, main = "Hist of bootstrap difference using \n GLM and beta-binomial density", cex.main = 0.7, xlab = "Delta", ylim = c(0, 5))
+abline(v = mean(b$t), col = "red", lwd = 2)
+abline(v = mean(b$t), col = "blue", lwd = 2)
+lines(density(delta_a), col = "blue", lwd = 2)
+
+hist(delta_b, prob = T, main = "Hist of MCMC estimated difference using \n brm logistic and Polya-gamma density", cex.main = 0.7, xlab = "Delta", ylim = c(0, 5))
+abline(v = mean(delta_b), col = "orange", lwd = 2)
+abline(v = mean(delta_c), col = "green", lwd = 2)
+lines(density(delta_c), col = "green", lwd = 2)
+par(mfrow = c(1, 1))
+```
+
+# Conclusion
+
+In this basic and single example we get similar estimates of the treatment effects regardless of which approach we take. Comparing timings between the brm and PG approach is an unfair comparison as the brm approach used grouped data, whereas PG uses the bernoulli form. Simulation required to get a deeper understanding of the characteristics of each method.
+
+
 
